@@ -59,6 +59,7 @@ import sounddevice as sd
 # --- tuning knobs -----------------------------------------------------------
 GREETING = "Ravi de vous retrouver, Emma. Je suis prêt quand vous l’êtes."
 GREETING_AUDIO = Path(__file__).resolve().parent / "assets" / "adrien-jarvis.wav"
+CHROME_CONFIRM_AUDIO = Path(__file__).resolve().parent / "assets" / "chrome-ouvert.wav"
 COMMAND_LANGUAGE = "fr-FR"
 COMMAND_LISTEN_SECONDS = 4.0
 SAMPLE_RATE = 44100
@@ -866,22 +867,27 @@ def _focus_existing_cursor_window_win32() -> bool:
     return True
 
 
-def play_local_greeting() -> None:
-    """Play the saved Jarvis greeting through the Windows default audio output."""
-    if not GREETING_AUDIO.is_file():
-        log.warning("Greeting audio not found: %s", GREETING_AUDIO)
+def play_local_audio(path: Path, label: str) -> None:
+    """Play a local WAV file through the default audio output."""
+    if not path.is_file():
+        log.warning("%s audio not found: %s", label, path)
         return
 
     if sys.platform == "win32":
         try:
             import winsound
 
-            winsound.PlaySound(str(GREETING_AUDIO), winsound.SND_FILENAME)
+            winsound.PlaySound(str(path), winsound.SND_FILENAME)
             return
         except RuntimeError as e:
-            log.warning("Could not play greeting with Windows audio: %s", e)
+            log.warning("Could not play %s audio with Windows audio: %s", label, e)
 
-    _play_pcm_wav_file(GREETING_AUDIO)
+    _play_pcm_wav_file(path)
+
+
+def play_local_greeting() -> None:
+    """Play the saved Jarvis greeting."""
+    play_local_audio(GREETING_AUDIO, "Greeting")
 
 
 def listen_for_voice_command(stream: sd.InputStream, blocksize: int) -> str | None:
@@ -954,6 +960,7 @@ def handle_voice_command(command: str) -> None:
     """Match a recognized French command to a Jarvis action."""
     if "chrome" in command and ("ouvre" in command or "ouvrir" in command):
         open_chrome()
+        play_local_audio(CHROME_CONFIRM_AUDIO, "Chrome confirmation")
     else:
         log.info("Commande non reconnue : %s", command)
 
