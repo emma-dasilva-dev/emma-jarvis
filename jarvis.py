@@ -1455,10 +1455,16 @@ def handle_voice_command(
         finally:
             stream.start()
     elif (
-        "projet" in normalized
-        and ("verifie" in normalized or "verifier" in normalized)
+        ("verifie" in normalized or "verifier" in normalized)
+        and "git" in normalized
+        and ("compilation" in normalized or "compile" in normalized)
+        and ("test" in normalized or "tests" in normalized)
+        and ("debug" in normalized or "debogage" in normalized)
     ):
-        set_jarvis_state("processing", "Vérification du projet…")
+        set_jarvis_state(
+            "processing",
+            "Vérification de Git, la compilation, les tests et les traces de debug…",
+        )
         project_result = check_project()
         result_message = _project_check_message(project_result)
 
