@@ -59,6 +59,8 @@ import sounddevice as sd
 # --- tuning knobs -----------------------------------------------------------
 GREETING = "Ravi de vous retrouver, Emma. Je suis prêt quand vous l’êtes."
 GREETING_AUDIO = Path(__file__).resolve().parent / "assets" / "adrien-jarvis.wav"
+COMMAND_LANGUAGE = "fr-FR"
+COMMAND_LISTEN_SECONDS = 4.0
 SAMPLE_RATE = 44100
 BLOCK_MS = 40
 CHANNELS = 1
@@ -882,10 +884,95 @@ def play_local_greeting() -> None:
     _play_pcm_wav_file(GREETING_AUDIO)
 
 
-def run_double_clap_actions() -> None:
-    """Run the action triggered by a detected double clap."""
+def listen_for_voice_command(stream: sd.InputStream, blocksize: int) -> str | None:
+    """Record a short command from the existing microphone stream and transcribe it in French."""
+    try:
+        import speech_recognition as sr
+    except ImportError:
+        log.error("SpeechRecognition is missing. Run: python -m pip install -r requirements.txt")
+        return None
+
+    log.info("Jarvis écoute... Parlez maintenant.")
+    frames: list[np.ndarray] = []
+    deadline = time.monotonic() + COMMAND_LISTEN_SECONDS
+
+    while time.monotonic() < deadline:
+        data, overflowed = stream.read(blocksize)
+        if overflowed:
+            log.warning("Input overflow while listening for command.")
+        frames.append(data.copy())
+
+    if not frames:
+        return None
+
+    recorded = np.concatenate(frames, axis=0)
+    if recorded.ndim > 1:
+        recorded = np.mean(recorded, axis=1)
+
+    pcm = np.clip(recorded, -1.0, 1.0)
+    pcm = (pcm * 32767.0).astype(np.int16)
+
+    recognizer = sr.Recognizer()
+    audio = sr.AudioData(pcm.tobytes(), SAMPLE_RATE, 2)
+
+    try:
+        command = recognizer.recognize_google(audio, language=COMMAND_LANGUAGE)
+    except sr.UnknownValueError:
+        log.info("Je n’ai pas compris la commande.")
+        return None
+    except sr.RequestError as e:
+        log.warning("Reconnaissance vocale indisponible : %s", e)
+        return None
+
+    command = command.strip().lower()
+    log.info("Commande entendue : %s", command)
+    return command
+
+
+def open_chrome() -> None:
+    """Open Google Chrome without forcing a specific page."""
+    chrome = _chrome_executable()
+    try:
+        if chrome:
+            popen_kw: dict = {
+                "stdin": subprocess.DEVNULL,
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+            }
+            if sys.platform == "win32":
+                popen_kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+            subprocess.Popen([chrome], **popen_kw)
+            log.info("Chrome ouvert.")
+            return
+    except OSError as e:
+        log.warning("Impossible d’ouvrir Chrome directement : %s", e)
+
+    webbrowser.open("https://www.google.com")
+
+
+def handle_voice_command(command: str) -> None:
+    """Match a recognized French command to a Jarvis action."""
+    if "chrome" in command and ("ouvre" in command or "ouvrir" in command):
+        open_chrome()
+    else:
+        log.info("Commande non reconnue : %s", command)
+
+
+def run_double_clap_actions(stream: sd.InputStream, blocksize: int) -> None:
+    """Greet Emma, listen for one French voice command, then run it."""
     log.info("Réponse de Jarvis : %s", GREETING)
-    play_local_greeting()
+
+    # Pause microphone capture while the greeting plays so Jarvis does not transcribe itself.
+    stream.stop()
+    try:
+        play_local_greeting()
+    finally:
+        stream.start()
+
+    time.sleep(0.15)
+    command = listen_for_voice_command(stream, blocksize)
+    if command:
+        handle_voice_command(command)
 
 
 def open_cursor_window() -> None:
@@ -1040,9 +1127,11 @@ def main() -> int:
                                 noise_floor,
                                 threshold,
                             )
-                            threading.Thread(
-                                target=run_double_clap_actions, daemon=True
-                            ).start()
+                            run_double_clap_actions(stream, blocksize)
+                            # Reset clap state after voice mode finishes.
+                            first_clap_time = None
+                            spike_armed = False
+                            last_logged_double = time.monotonic()
                         else:
                             first_clap_time = now
 
