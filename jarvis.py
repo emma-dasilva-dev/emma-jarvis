@@ -39,7 +39,9 @@ Tuning (constants below):
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -55,6 +57,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import numpy as np
 import sounddevice as sd
+import websockets
 
 # --- tuning knobs -----------------------------------------------------------
 GREETING = "Ravi de vous retrouver, Emma. Je suis prêt quand vous l’êtes."
@@ -62,6 +65,8 @@ GREETING_AUDIO = Path(__file__).resolve().parent / "assets" / "adrien-jarvis.wav
 CHROME_CONFIRM_AUDIO = Path(__file__).resolve().parent / "assets" / "chrome-ouvert.wav"
 COMMAND_LANGUAGE = "fr-FR"
 COMMAND_LISTEN_SECONDS = 4.0
+STATE_WS_HOST = "127.0.0.1"
+STATE_WS_PORT = 8765
 POST_ACTION_COOLDOWN_S = 2.5
 SAMPLE_RATE = 44100
 BLOCK_MS = 40
@@ -118,6 +123,77 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger("clap_listen")
+
+# --- UI state bridge --------------------------------------------------------
+_jarvis_state = {"state": "idle", "message": "En attente"}
+_state_loop: asyncio.AbstractEventLoop | None = None
+_state_clients: set = set()
+_state_lock = threading.Lock()
+
+
+async def _state_client_handler(websocket) -> None:
+    _state_clients.add(websocket)
+    try:
+        with _state_lock:
+            payload = json.dumps(_jarvis_state, ensure_ascii=False)
+        await websocket.send(payload)
+        await websocket.wait_closed()
+    finally:
+        _state_clients.discard(websocket)
+
+
+async def _broadcast_state(payload: str) -> None:
+    if not _state_clients:
+        return
+    dead = []
+    for client in tuple(_state_clients):
+        try:
+            await client.send(payload)
+        except Exception:
+            dead.append(client)
+    for client in dead:
+        _state_clients.discard(client)
+
+
+def set_jarvis_state(state: str, message: str) -> None:
+    """Publish Jarvis's current state to the local orb UI."""
+    global _jarvis_state
+    with _state_lock:
+        _jarvis_state = {"state": state, "message": message}
+        payload = json.dumps(_jarvis_state, ensure_ascii=False)
+
+    log.info("UI state: %s — %s", state, message)
+
+    loop = _state_loop
+    if loop is not None and loop.is_running():
+        asyncio.run_coroutine_threadsafe(_broadcast_state(payload), loop)
+
+
+async def _run_state_server() -> None:
+    global _state_loop
+    _state_loop = asyncio.get_running_loop()
+    async with websockets.serve(
+        _state_client_handler,
+        STATE_WS_HOST,
+        STATE_WS_PORT,
+    ):
+        log.info(
+            "Jarvis UI bridge ready at ws://%s:%d",
+            STATE_WS_HOST,
+            STATE_WS_PORT,
+        )
+        await asyncio.Future()
+
+
+def start_state_server() -> None:
+    def runner() -> None:
+        try:
+            asyncio.run(_run_state_server())
+        except OSError as e:
+            log.warning("Could not start Jarvis UI bridge: %s", e)
+
+    threading.Thread(target=runner, daemon=True, name="jarvis-ui-state").start()
+
 
 
 def block_samples() -> int:
@@ -962,9 +1038,10 @@ def handle_voice_command(
 ) -> None:
     """Match a recognized French command to a Jarvis action."""
     if "chrome" in command and ("ouvre" in command or "ouvrir" in command):
+        set_jarvis_state("processing", "Ouverture de Chrome…")
         open_chrome()
 
-        # Jarvis must not hear its own confirmation sound.
+        set_jarvis_state("speaking", "Chrome ouvert.")
         stream.stop()
         try:
             play_local_audio(CHROME_CONFIRM_AUDIO, "Chrome confirmation")
@@ -972,13 +1049,14 @@ def handle_voice_command(
             stream.start()
     else:
         log.info("Commande non reconnue : %s", command)
+        set_jarvis_state("idle", "Commande non reconnue")
 
 
 def run_double_clap_actions(stream: sd.InputStream, blocksize: int) -> None:
     """Greet Emma, listen for one French voice command, then run it."""
     log.info("Réponse de Jarvis : %s", GREETING)
 
-    # Pause microphone capture while the greeting plays so Jarvis does not transcribe itself.
+    set_jarvis_state("speaking", GREETING)
     stream.stop()
     try:
         play_local_greeting()
@@ -986,9 +1064,14 @@ def run_double_clap_actions(stream: sd.InputStream, blocksize: int) -> None:
         stream.start()
 
     time.sleep(0.15)
+    set_jarvis_state("listening", "Je vous écoute…")
     command = listen_for_voice_command(stream, blocksize)
+
     if command:
+        set_jarvis_state("processing", f"Commande : {command}")
         handle_voice_command(command, stream)
+
+    set_jarvis_state("idle", "En attente")
 
 
 def open_cursor_window() -> None:
@@ -1029,6 +1112,8 @@ def open_cursor_window() -> None:
 
 
 def main() -> int:
+    start_state_server()
+    set_jarvis_state("idle", "En attente")
     blocksize = block_samples()
     noise_floor = 1e-4
     last_logged_double = 0.0
