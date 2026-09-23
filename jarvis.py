@@ -64,6 +64,7 @@ import websockets
 GREETING = "Ravi de vous retrouver, Emma. Je suis prêt quand vous l’êtes."
 GREETING_AUDIO = Path(__file__).resolve().parent / "assets" / "adrien-jarvis.wav"
 CHROME_CONFIRM_AUDIO = Path(__file__).resolve().parent / "assets" / "chrome-ouvert.wav"
+PROJECT_CHECK_AUDIO = Path(__file__).resolve().parent / "assets" / "project-check.wav"
 COMMAND_LANGUAGE = "fr-FR"
 COMMAND_LISTEN_SECONDS = 4.0
 COMMAND_MIC_WARMUP_SECONDS = 0.35
@@ -1460,14 +1461,15 @@ def handle_voice_command(
         set_jarvis_state("processing", "Vérification du projet…")
         project_result = check_project()
         result_message = _project_check_message(project_result)
-        spoken_summary = _project_check_speech(project_result)
 
-        set_jarvis_state("idle", result_message)
-        spoke = speak_dynamic_french(spoken_summary, stream)
-
-        # If ElevenLabs is unavailable, still keep the visual result readable.
-        if not spoke:
-            time.sleep(3.5)
+        # Keep the real check result on screen while the prerecorded French
+        # summary plays. The orb still reacts to the WAV's real amplitude.
+        set_jarvis_state("speaking", result_message)
+        stream.stop()
+        try:
+            play_local_audio(PROJECT_CHECK_AUDIO, "Project check")
+        finally:
+            stream.start()
     else:
         log.info("Commande non reconnue : %s", command)
         set_jarvis_state("idle", "Commande non reconnue")
