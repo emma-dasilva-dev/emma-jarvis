@@ -63,18 +63,17 @@ CHROME_CONFIRM_AUDIO = Path(__file__).resolve().parent / "assets" / "chrome-ouve
 COMMAND_LANGUAGE = "fr-FR"
 COMMAND_LISTEN_SECONDS = 4.0
 POST_ACTION_COOLDOWN_S = 2.5
-REARM_QUIET_SECONDS = 1.0
 SAMPLE_RATE = 44100
 BLOCK_MS = 40
 CHANNELS = 1
 
-SPIKE_RATIO = 9.0
+SPIKE_RATIO = 7.0
 COOLDOWN_S = 0.45
 MIN_DOUBLE_GAP_S = 0.05
 MAX_DOUBLE_GAP_S = 0.35
 RETRIGGER_RATIO = 0.55
 NOISE_FLOOR_ALPHA = 0.992
-MIN_RMS = 0.03
+MIN_RMS = 0.012
 QUIET_GATE_MULT = 2.2  # update noise floor only when below floor * this
 # Startup mic probe: if default input RMS stays below this, scan for a louder device.
 INPUT_PROBE_S = 0.5
@@ -869,37 +868,22 @@ def _focus_existing_cursor_window_win32() -> bool:
     return True
 
 
-def play_local_audio(path: Path, label: str) -> bool:
-    """Play a real WAV file through the default audio output."""
+def play_local_audio(path: Path, label: str) -> None:
+    """Play a local WAV file through the default audio output."""
     if not path.is_file():
         log.warning("%s audio not found: %s", label, path)
-        return False
-
-    try:
-        with path.open("rb") as audio_file:
-            header = audio_file.read(12)
-    except OSError as e:
-        log.warning("Could not read %s audio: %s", label, e)
-        return False
-
-    if not (header.startswith(b"RIFF") and header[8:12] == b"WAVE"):
-        log.error(
-            "%s is not a real WAV file: %s. Export it as WAV instead of renaming an MP3.",
-            label,
-            path,
-        )
-        return False
+        return
 
     if sys.platform == "win32":
         try:
             import winsound
 
             winsound.PlaySound(str(path), winsound.SND_FILENAME)
-            return True
+            return
         except RuntimeError as e:
             log.warning("Could not play %s audio with Windows audio: %s", label, e)
 
-    return _play_pcm_wav_file(path)
+    _play_pcm_wav_file(path)
 
 
 def play_local_greeting() -> None:
@@ -1050,7 +1034,6 @@ def main() -> int:
     last_logged_double = 0.0
     first_clap_time: float | None = None
     spike_armed = True
-    rearm_quiet_since: float | None = None
 
     log.info(
         "Listening (double clap: %.2f–%.2fs apart, rate=%d, block=%d ms, "
@@ -1135,16 +1118,7 @@ def main() -> int:
                 retrigger_level = threshold * RETRIGGER_RATIO
 
                 if level < retrigger_level:
-                    if rearm_quiet_since is None:
-                        rearm_quiet_since = now
-                    elif (
-                        not spike_armed
-                        and (now - rearm_quiet_since) >= REARM_QUIET_SECONDS
-                        and (now - last_logged_double) >= COOLDOWN_S
-                    ):
-                        spike_armed = True
-                else:
-                    rearm_quiet_since = None
+                    spike_armed = True
 
                 if (
                     spike_armed
@@ -1174,7 +1148,6 @@ def main() -> int:
                             # allowing a new double clap.
                             first_clap_time = None
                             spike_armed = False
-                            rearm_quiet_since = None
                             last_logged_double = time.monotonic() + POST_ACTION_COOLDOWN_S
                         else:
                             first_clap_time = now
