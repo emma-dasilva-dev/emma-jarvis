@@ -1,15 +1,22 @@
 from pathlib import Path
-import wave
-
-import numpy as np
-import sounddevice as sd
+import sys
 
 AUDIO_FILE = Path(__file__).resolve().parent / "assets" / "adrien-jarvis.wav"
 
 
 def play_greeting() -> None:
     if not AUDIO_FILE.is_file():
-        raise FileNotFoundError(f"Greeting audio not found: {AUDIO_FILE}")
+        raise FileNotFoundError(f"Audio de Jarvis introuvable : {AUDIO_FILE}")
+
+    if sys.platform == "win32":
+        import winsound
+
+        winsound.PlaySound(str(AUDIO_FILE), winsound.SND_FILENAME)
+        return
+
+    import wave
+    import numpy as np
+    import sounddevice as sd
 
     with wave.open(str(AUDIO_FILE), "rb") as audio:
         channels = audio.getnchannels()
@@ -18,10 +25,9 @@ def play_greeting() -> None:
         raw_audio = audio.readframes(audio.getnframes())
 
     if sample_width != 2:
-        raise ValueError("The greeting WAV must use 16-bit audio.")
+        raise ValueError("Le fichier WAV doit être en audio 16 bits.")
 
     samples = np.frombuffer(raw_audio, dtype=np.int16)
-
     if channels > 1:
         samples = samples.reshape(-1, channels)
 
