@@ -18,6 +18,41 @@ UI_DIR = ROOT / "ui"
 UI_URL = "http://127.0.0.1:5173"
 UI_HOST = "127.0.0.1"
 UI_PORT = 5173
+PRE_PUSH_AUDIO = ROOT / "assets" / "pre-push-check.wav"
+
+
+def _install_pre_push_command() -> None:
+    """Add the short French pre-push command without disturbing stable voice capture."""
+    original_handler = jarvis.handle_voice_command
+
+    def handle_voice_command(command: str, stream) -> None:
+        normalized = jarvis._normalize_french_command(command)
+        is_pre_push = (
+            "controle pre-push" in normalized
+            or "controle pre push" in normalized
+            or "pre-push" in normalized
+            or "pre push" in normalized
+        )
+
+        if not is_pre_push:
+            original_handler(command, stream)
+            return
+
+        jarvis.set_jarvis_state("processing", "Contrôle pré-push…")
+        project_result = jarvis.check_project()
+        result_message = jarvis._project_check_message(project_result)
+
+        jarvis.set_jarvis_state("speaking", result_message)
+        stream.stop()
+        try:
+            jarvis.play_local_audio(PRE_PUSH_AUDIO, "Pre-push check")
+        finally:
+            stream.start()
+
+    jarvis.handle_voice_command = handle_voice_command
+
+
+_install_pre_push_command()
 
 
 def _wait_for_ui_and_open() -> None:
