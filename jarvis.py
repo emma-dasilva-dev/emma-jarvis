@@ -75,7 +75,7 @@ INPUT_SILENT_RMS = 0.001
 
 # Spotify: "spotify:track:TRACK_ID" or https://open.spotify.com/track/...
 # YouTube: https://www.youtube.com/watch?v=...
-SONG_URI = "https://open.spotify.com/playlist/1oAZvLwsf8HypN3SgNEySM?si=Vyo8mLGyR9K_0mUa9w2_CA"
+SONG_URI = ""
 
 # Cursor: focus existing instance (no -n). Set OPEN_NEW_CURSOR_ON_DOUBLE_CLAP for a new window as well.
 FOCUS_EXISTING_CURSOR_ON_DOUBLE_CLAP = False
@@ -92,7 +92,7 @@ CHROME_SEPARATE_SITE_PROFILES = False
 CLAUDE_CHROME_MONITOR = 1
 BINANCE_CHROME_MONITOR = 3
 
-JARVIS_WELCOME_ENABLED = True
+JARVIS_WELCOME_ENABLED = False
 JARVIS_WELCOME_PHRASE = (
     "Welcome home sir. "
     "Congratulations on the new client for your SaaS app—make sure to follow up. "
@@ -863,16 +863,8 @@ def _focus_existing_cursor_window_win32() -> bool:
 
 
 def run_double_clap_actions() -> None:
-    """Run outside the mic loop so sleeps do not stall capture."""
-    play_song(SONG_URI)
-    open_claude_in_chrome()
-    open_binance_btc_in_chrome()
-    if JARVIS_WELCOME_ENABLED and JARVIS_WELCOME_PHRASE.strip():
-        delay = max(0.0, JARVIS_AFTER_SONG_DELAY_S)
-        if delay:
-            time.sleep(delay)
-        threading.Thread(target=say_jarvis_welcome, daemon=True).start()
-    open_cursor_window()
+    """Run the action triggered by a detected double clap."""
+    log.info("Double clap action: Hello Emma.")
 
 
 def open_cursor_window() -> None:
