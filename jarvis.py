@@ -78,14 +78,14 @@ INPUT_SILENT_RMS = 0.001
 SONG_URI = "https://open.spotify.com/playlist/1oAZvLwsf8HypN3SgNEySM?si=Vyo8mLGyR9K_0mUa9w2_CA"
 
 # Cursor: focus existing instance (no -n). Set OPEN_NEW_CURSOR_ON_DOUBLE_CLAP for a new window as well.
-FOCUS_EXISTING_CURSOR_ON_DOUBLE_CLAP = True
+FOCUS_EXISTING_CURSOR_ON_DOUBLE_CLAP = False
 OPEN_NEW_CURSOR_ON_DOUBLE_CLAP = False
-CURSOR_OPEN_FULLSCREEN = True
+CURSOR_OPEN_FULLSCREEN = False
 
 # Google Chrome (fallback: default browser). URLs overridable in .env.
-OPEN_CLAUDE_CODE_IN_CHROME = True
-OPEN_BINANCE_BTC_IN_CHROME = True
-OPEN_CHROME_FULLSCREEN = True
+OPEN_CLAUDE_CODE_IN_CHROME = False
+OPEN_BINANCE_BTC_IN_CHROME = False
+OPEN_CHROME_FULLSCREEN = False
 # False = default Chrome profile (your normal user, extensions, cookies). True = temp dirs under %TEMP% per site.
 CHROME_SEPARATE_SITE_PROFILES = False
 # Which physical screen (1 = leftmost/top-first after sorting). Windows only; ignored elsewhere.
