@@ -18,6 +18,22 @@ export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
   state = "idle",
 }) => {
   const ctnDom = useRef<HTMLDivElement>(null);
+  const activityRef = useRef(activity);
+  const hueRef = useRef(hue);
+  const stateRef = useRef(state);
+
+  useEffect(() => {
+    activityRef.current = activity;
+  }, [activity]);
+
+  useEffect(() => {
+    hueRef.current = hue;
+  }, [hue]);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
   useEffect(() => {
     const container = ctnDom.current;
     if (!container) return;
@@ -214,7 +230,7 @@ export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
               gl.canvas.width / gl.canvas.height,
             ),
           },
-          hue: { value: hue },
+          hue: { value: hueRef.current },
           hover: { value: 0 },
           rot: { value: 0 },
           hoverIntensity: { value: 0 },
@@ -247,6 +263,7 @@ export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
 
       let lastTime = 0;
       let currentRot = 0;
+      let smoothedActivity = activityRef.current;
       const baseRotationSpeed = 0.18;
 
       const update = (t: number) => {
@@ -257,19 +274,31 @@ export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
         lastTime = t;
 
         program.uniforms.iTime.value = t * 0.001;
-        program.uniforms.hue.value = hue;
+        program.uniforms.hue.value = hueRef.current;
 
-        const targetActivity = Math.max(0, Math.min(activity, 1));
+        const targetActivity = Math.max(
+          0,
+          Math.min(activityRef.current, 1),
+        );
+        const smoothing = 1 - Math.exp(-dt * 12);
+        smoothedActivity +=
+          (targetActivity - smoothedActivity) * smoothing;
+
+        const currentState = stateRef.current;
         const stateBoost =
-          state === "processing" ? 1.5 :
-          state === "speaking" ? 1.2 :
-          state === "listening" ? 0.9 : 0.2;
+          currentState === "processing" ? 1.5 :
+          currentState === "speaking" ? 1.2 :
+          currentState === "listening" ? 0.9 : 0.2;
 
-        currentRot += dt * (baseRotationSpeed + targetActivity * stateBoost);
+        currentRot +=
+          dt * (baseRotationSpeed + smoothedActivity * stateBoost);
 
-        program.uniforms.hover.value = Math.min(targetActivity * 1.55, 1);
+        program.uniforms.hover.value = Math.min(
+          smoothedActivity * 1.55,
+          1,
+        );
         program.uniforms.hoverIntensity.value = Math.min(
-          targetActivity * 0.72,
+          smoothedActivity * 0.72,
           0.8,
         );
         program.uniforms.rot.value = currentRot;
@@ -295,7 +324,7 @@ export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
 
       return () => {};
     }
-  }, [activity, hue, state]);
+  }, []);
 
   return <div ref={ctnDom} className={cn("relative h-full w-full", className)} />;
 };
