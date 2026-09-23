@@ -125,7 +125,7 @@ logging.basicConfig(
 log = logging.getLogger("clap_listen")
 
 # --- UI state bridge --------------------------------------------------------
-_jarvis_state = {"state": "idle", "message": "En attente"}
+_jarvis_state = {"state": "idle", "message": "En attente", "level": 0.0}
 _state_loop: asyncio.AbstractEventLoop | None = None
 _state_clients: set = set()
 _state_lock = threading.Lock()
@@ -155,18 +155,33 @@ async def _broadcast_state(payload: str) -> None:
         _state_clients.discard(client)
 
 
+def _schedule_state_broadcast(payload: str) -> None:
+    loop = _state_loop
+    if loop is not None and loop.is_running():
+        asyncio.run_coroutine_threadsafe(_broadcast_state(payload), loop)
+
+
 def set_jarvis_state(state: str, message: str) -> None:
     """Publish Jarvis's current state to the local orb UI."""
     global _jarvis_state
     with _state_lock:
-        _jarvis_state = {"state": state, "message": message}
+        _jarvis_state = {"state": state, "message": message, "level": 0.0}
         payload = json.dumps(_jarvis_state, ensure_ascii=False)
 
     log.info("UI state: %s — %s", state, message)
+    _schedule_state_broadcast(payload)
 
-    loop = _state_loop
-    if loop is not None and loop.is_running():
-        asyncio.run_coroutine_threadsafe(_broadcast_state(payload), loop)
+
+def publish_audio_level(level: float) -> None:
+    """Update only the live voice amplitude used by the orb."""
+    global _jarvis_state
+    normalized = max(0.0, min(float(level), 1.0))
+
+    with _state_lock:
+        _jarvis_state = {**_jarvis_state, "level": normalized}
+        payload = json.dumps(_jarvis_state, ensure_ascii=False)
+
+    _schedule_state_broadcast(payload)
 
 
 async def _run_state_server() -> None:
@@ -945,21 +960,56 @@ def _focus_existing_cursor_window_win32() -> bool:
 
 
 def play_local_audio(path: Path, label: str) -> None:
-    """Play a local WAV file through the default audio output."""
+    """Play a PCM WAV and stream its real amplitude to the Jarvis orb."""
     if not path.is_file():
         log.warning("%s audio not found: %s", label, path)
         return
 
-    if sys.platform == "win32":
-        try:
-            import winsound
+    try:
+        with wave.open(str(path), "rb") as wf:
+            channels = wf.getnchannels()
+            sample_width = wf.getsampwidth()
+            sample_rate = wf.getframerate()
 
-            winsound.PlaySound(str(path), winsound.SND_FILENAME)
-            return
-        except RuntimeError as e:
-            log.warning("Could not play %s audio with Windows audio: %s", label, e)
+            if sample_width != 2:
+                log.warning(
+                    "%s WAV must be 16-bit PCM for visualized playback (width=%d).",
+                    label,
+                    sample_width,
+                )
+                _play_pcm_wav_file(path)
+                return
 
-    _play_pcm_wav_file(path)
+            chunk_frames = 1024
+            smoothed_level = 0.0
+
+            with sd.OutputStream(
+                samplerate=sample_rate,
+                channels=channels,
+                dtype="int16",
+            ) as output:
+                while True:
+                    raw = wf.readframes(chunk_frames)
+                    if not raw:
+                        break
+
+                    samples = np.frombuffer(raw, dtype=np.int16)
+                    if channels > 1:
+                        samples = samples.reshape(-1, channels)
+
+                    output.write(samples)
+
+                    normalized = samples.astype(np.float32) / 32768.0
+                    rms = float(np.sqrt(np.mean(normalized * normalized)))
+                    target = min(rms * 5.5, 1.0)
+                    smoothed_level = smoothed_level * 0.35 + target * 0.65
+                    publish_audio_level(smoothed_level)
+
+    except (OSError, wave.Error, sd.PortAudioError, ValueError) as e:
+        log.warning("Could not play %s with visualized audio: %s", label, e)
+        _play_pcm_wav_file(path)
+    finally:
+        publish_audio_level(0.0)
 
 
 def play_local_greeting() -> None:
