@@ -57,7 +57,8 @@ import numpy as np
 import sounddevice as sd
 
 # --- tuning knobs -----------------------------------------------------------
-GREETING = "Good to have you back, Emma. I'm ready when you are."
+GREETING = "Ravi de vous retrouver, Emma. Je suis prêt quand vous l’êtes."
+GREETING_AUDIO = Path(__file__).resolve().parent / "assets" / "adrien-jarvis.wav"
 SAMPLE_RATE = 44100
 BLOCK_MS = 40
 CHANNELS = 1
@@ -863,9 +864,28 @@ def _focus_existing_cursor_window_win32() -> bool:
     return True
 
 
+def play_local_greeting() -> None:
+    """Play the saved Jarvis greeting through the Windows default audio output."""
+    if not GREETING_AUDIO.is_file():
+        log.warning("Greeting audio not found: %s", GREETING_AUDIO)
+        return
+
+    if sys.platform == "win32":
+        try:
+            import winsound
+
+            winsound.PlaySound(str(GREETING_AUDIO), winsound.SND_FILENAME)
+            return
+        except RuntimeError as e:
+            log.warning("Could not play greeting with Windows audio: %s", e)
+
+    _play_pcm_wav_file(GREETING_AUDIO)
+
+
 def run_double_clap_actions() -> None:
     """Run the action triggered by a detected double clap."""
-    log.info("Double clap action: %s", GREETING)
+    log.info("Réponse de Jarvis : %s", GREETING)
+    play_local_greeting()
 
 
 def open_cursor_window() -> None:
