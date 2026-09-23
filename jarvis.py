@@ -75,7 +75,7 @@ INPUT_SILENT_RMS = 0.001
 
 # Spotify: "spotify:track:TRACK_ID" or https://open.spotify.com/track/...
 # YouTube: https://www.youtube.com/watch?v=...
-SONG_URI = "https://open.spotify.com/track/39shmbIHICJ2Wxnk1fPSdz?si=2900c75c2e2d4b82"
+SONG_URI = "https://open.spotify.com/playlist/1oAZvLwsf8HypN3SgNEySM?si=Vyo8mLGyR9K_0mUa9w2_CA"
 
 # Cursor: focus existing instance (no -n). Set OPEN_NEW_CURSOR_ON_DOUBLE_CLAP for a new window as well.
 FOCUS_EXISTING_CURSOR_ON_DOUBLE_CLAP = True
