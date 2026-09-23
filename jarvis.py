@@ -1095,7 +1095,14 @@ def _run_project_command(
 
 
 def _find_project_root(start: Path | None = None) -> Path:
-    """Return the current Git repository root, or the current directory as fallback."""
+    """Return the configured/current Git repository root, or the directory as fallback."""
+    configured = (os.environ.get("JARVIS_PROJECT_PATH") or "").strip()
+    if start is None and configured:
+        candidate = Path(configured).expanduser()
+        if candidate.exists():
+            start = candidate
+        else:
+            log.warning("JARVIS_PROJECT_PATH n’existe pas : %s", candidate)
     current = (start or Path.cwd()).resolve()
     try:
         result = _run_project_command(
@@ -1312,6 +1319,8 @@ def handle_voice_command(
         set_jarvis_state("processing", "Vérification du projet…")
         project_result = check_project()
         set_jarvis_state("idle", _project_check_message(project_result))
+        # Keep the result visible long enough to read before returning to idle.
+        time.sleep(3.5)
     else:
         log.info("Commande non reconnue : %s", command)
         set_jarvis_state("idle", "Commande non reconnue")
