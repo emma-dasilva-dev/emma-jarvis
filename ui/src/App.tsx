@@ -6,6 +6,7 @@ type JarvisState = "idle" | "speaking" | "listening" | "processing";
 type JarvisMessage = {
   state: JarvisState;
   message: string;
+  level: number;
 };
 
 const STATE_CONFIG: Record<
@@ -38,6 +39,7 @@ export default function App() {
   const [jarvis, setJarvis] = useState<JarvisMessage>({
     state: "idle",
     message: "Connexion à Jarvis…",
+    level: 0,
   });
   const [connected, setConnected] = useState(false);
 
@@ -65,6 +67,10 @@ export default function App() {
             setJarvis({
               state: next.state as JarvisState,
               message: next.message || "",
+              level:
+                typeof next.level === "number"
+                  ? Math.max(0, Math.min(next.level, 1))
+                  : 0,
             });
           }
         } catch {
@@ -94,6 +100,10 @@ export default function App() {
   }, []);
 
   const config = useMemo(() => STATE_CONFIG[jarvis.state], [jarvis.state]);
+  const orbActivity =
+    jarvis.state === "speaking"
+      ? Math.max(0.08, jarvis.level)
+      : config.activity;
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-black">
@@ -110,7 +120,7 @@ export default function App() {
           <VoicePoweredOrb
             className="relative z-10 h-full w-full"
             hue={config.hue}
-            activity={config.activity}
+            activity={orbActivity}
             state={jarvis.state}
           />
         </div>
