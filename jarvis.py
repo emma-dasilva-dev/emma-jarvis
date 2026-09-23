@@ -64,7 +64,7 @@ import websockets
 GREETING = "Ravi de vous retrouver, Emma. Je suis prêt quand vous l’êtes."
 GREETING_AUDIO = Path(__file__).resolve().parent / "assets" / "adrien-jarvis.wav"
 CHROME_CONFIRM_AUDIO = Path(__file__).resolve().parent / "assets" / "chrome-ouvert.wav"
-PROJECT_CHECK_AUDIO = Path(__file__).resolve().parent / "assets" / "project-check.wav"
+PRE_PUSH_CHECK_AUDIO = Path(__file__).resolve().parent / "assets" / "pre-push-check.wav"
 COMMAND_LANGUAGE = "fr-FR"
 COMMAND_LISTEN_SECONDS = 4.0
 COMMAND_MIC_WARMUP_SECONDS = 0.35
@@ -1455,25 +1455,25 @@ def handle_voice_command(
         finally:
             stream.start()
     elif (
-        ("verifie" in normalized or "verifier" in normalized)
-        and "git" in normalized
-        and ("compilation" in normalized or "compile" in normalized)
-        and ("test" in normalized or "tests" in normalized)
-        and ("debug" in normalized or "debogage" in normalized)
-    ):
-        set_jarvis_state(
-            "processing",
-            "Vérification de Git, la compilation, les tests et les traces de debug…",
+        "controle" in normalized
+        and (
+            "push" in normalized
+            or "pousse" in normalized
+            or "pre push" in normalized
+            or "pre-push" in normalized
+            or "pre pousse" in normalized
+            or "pre-pousse" in normalized
         )
+    ):
+        set_jarvis_state("processing", "Contrôle pré-push en cours…")
         project_result = check_project()
         result_message = _project_check_message(project_result)
 
-        # Keep the real check result on screen while the prerecorded French
-        # summary plays. The orb still reacts to the WAV's real amplitude.
+        # Keep the real result visible while the prerecorded response plays.
         set_jarvis_state("speaking", result_message)
         stream.stop()
         try:
-            play_local_audio(PROJECT_CHECK_AUDIO, "Project check")
+            play_local_audio(PRE_PUSH_CHECK_AUDIO, "Pre-push check")
         finally:
             stream.start()
     else:
