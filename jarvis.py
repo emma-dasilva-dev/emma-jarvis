@@ -50,6 +50,7 @@ import sys
 import tempfile
 import threading
 import time
+import unicodedata
 import wave
 import webbrowser
 from pathlib import Path
@@ -1070,6 +1071,203 @@ def listen_for_voice_command(stream: sd.InputStream, blocksize: int) -> str | No
     return command
 
 
+
+def _normalize_french_command(text: str) -> str:
+    """Lowercase a French command and remove accents for robust matching."""
+    normalized = unicodedata.normalize("NFKD", text.lower())
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def _run_project_command(
+    args: list[str], cwd: Path, timeout: int = 60
+) -> subprocess.CompletedProcess[str]:
+    """Run a local developer command and capture its output without opening a window."""
+    popen_kw: dict = {
+        "cwd": str(cwd),
+        "capture_output": True,
+        "text": True,
+        "errors": "replace",
+        "timeout": timeout,
+    }
+    if sys.platform == "win32":
+        popen_kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+    return subprocess.run(args, **popen_kw)
+
+
+def _find_project_root(start: Path | None = None) -> Path:
+    """Return the current Git repository root, or the current directory as fallback."""
+    current = (start or Path.cwd()).resolve()
+    try:
+        result = _run_project_command(
+            ["git", "rev-parse", "--show-toplevel"], current, timeout=10
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return Path(result.stdout.strip()).resolve()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return current
+
+
+def _count_c_debug_calls(root: Path) -> int:
+    """Count printf-like calls in C source files while ignoring common generated folders."""
+    ignored = {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "dist",
+        "build",
+        "__pycache__",
+    }
+    count = 0
+    patterns = ("printf(", "fprintf(", "puts(")
+
+    try:
+        paths = list(root.rglob("*.c")) + list(root.rglob("*.h"))
+    except OSError:
+        return 0
+
+    for path in paths:
+        if any(part in ignored for part in path.parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        count += sum(text.count(pattern) for pattern in patterns)
+
+    return count
+
+
+def check_project() -> dict[str, object]:
+    """Inspect the current project with real local tools and return a French summary."""
+    root = _find_project_root()
+    result: dict[str, object] = {
+        "root": str(root),
+        "git": "non détecté",
+        "untracked": 0,
+        "build": "non détecté",
+        "warnings": 0,
+        "debug_calls": 0,
+        "tests": "non détectés",
+        "issues": 0,
+    }
+
+    # Git status
+    try:
+        git = _run_project_command(
+            ["git", "status", "--porcelain", "--untracked-files=all"], root, timeout=15
+        )
+        if git.returncode == 0:
+            lines = [line for line in git.stdout.splitlines() if line.strip()]
+            untracked = sum(1 for line in lines if line.startswith("??"))
+            result["untracked"] = untracked
+            result["git"] = "propre" if not lines else f"{len(lines)} changement(s)"
+            if lines:
+                result["issues"] = int(result["issues"]) + 1
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log.warning("Vérification Git impossible : %s", e)
+
+    # C / Makefile build for the first student-focused version.
+    makefile = next(
+        (root / name for name in ("Makefile", "makefile", "GNUmakefile") if (root / name).is_file()),
+        None,
+    )
+    if makefile is not None and shutil.which("make"):
+        try:
+            build = _run_project_command(["make"], root, timeout=90)
+            combined = f"{build.stdout}\n{build.stderr}"
+            warning_count = combined.lower().count("warning:")
+            result["warnings"] = warning_count
+            if build.returncode == 0:
+                result["build"] = "réussie"
+            else:
+                result["build"] = "échouée"
+                result["issues"] = int(result["issues"]) + 1
+            if warning_count:
+                result["issues"] = int(result["issues"]) + 1
+            if combined.strip():
+                log.info("Sortie du build :\n%s", combined.strip()[-5000:])
+        except subprocess.TimeoutExpired:
+            result["build"] = "délai dépassé"
+            result["issues"] = int(result["issues"]) + 1
+        except OSError as e:
+            log.warning("Build impossible : %s", e)
+    elif makefile is not None:
+        result["build"] = "Makefile trouvé, make indisponible"
+
+    # Conservative C-source scan. These are reported, not automatically classified as errors.
+    debug_calls = _count_c_debug_calls(root)
+    result["debug_calls"] = debug_calls
+
+    # Run a conventional test target only when it actually exists in the Makefile.
+    if makefile is not None and shutil.which("make"):
+        try:
+            make_text = makefile.read_text(encoding="utf-8", errors="ignore")
+            has_test_target = any(
+                line.lstrip().startswith(("test:", "tests:", "check:"))
+                for line in make_text.splitlines()
+            )
+            if has_test_target:
+                test_target = next(
+                    target
+                    for target in ("test", "tests", "check")
+                    if any(
+                        line.lstrip().startswith(f"{target}:")
+                        for line in make_text.splitlines()
+                    )
+                )
+                tests = _run_project_command(["make", test_target], root, timeout=120)
+                result["tests"] = "réussis" if tests.returncode == 0 else "échoués"
+                if tests.returncode != 0:
+                    result["issues"] = int(result["issues"]) + 1
+                combined_tests = f"{tests.stdout}\n{tests.stderr}".strip()
+                if combined_tests:
+                    log.info("Sortie des tests :\n%s", combined_tests[-5000:])
+        except (OSError, subprocess.TimeoutExpired, StopIteration) as e:
+            log.warning("Tests automatiques impossibles : %s", e)
+
+    log.info(
+        "VÉRIFICATION DU PROJET\n"
+        "Projet : %s\n"
+        "Git : %s\n"
+        "Fichiers non suivis : %s\n"
+        "Compilation : %s\n"
+        "Warnings : %s\n"
+        "Tests : %s\n"
+        "Appels printf/fprintf/puts repérés : %s",
+        result["root"],
+        result["git"],
+        result["untracked"],
+        result["build"],
+        result["warnings"],
+        result["tests"],
+        result["debug_calls"],
+    )
+    return result
+
+
+def _project_check_message(result: dict[str, object]) -> str:
+    """Create a compact French orb message from a project check."""
+    issues = int(result.get("issues", 0))
+    build = result.get("build", "non détecté")
+    untracked = int(result.get("untracked", 0))
+    warnings = int(result.get("warnings", 0))
+
+    if issues == 0:
+        return f"Projet vérifié · build {build} · aucun problème détecté"
+
+    details: list[str] = []
+    if build not in ("réussie", "non détecté"):
+        details.append(f"build {build}")
+    if warnings:
+        details.append(f"{warnings} warning(s)")
+    if untracked:
+        details.append(f"{untracked} fichier(s) non suivi(s)")
+    if not details:
+        details.append(f"{issues} point(s) à vérifier")
+    return "Projet à vérifier · " + " · ".join(details[:3])
+
 def open_chrome() -> None:
     """Open Google Chrome without forcing a specific page."""
     chrome = _chrome_executable()
@@ -1095,7 +1293,9 @@ def handle_voice_command(
     command: str, stream: sd.InputStream
 ) -> None:
     """Match a recognized French command to a Jarvis action."""
-    if "chrome" in command and ("ouvre" in command or "ouvrir" in command):
+    normalized = _normalize_french_command(command)
+
+    if "chrome" in normalized and ("ouvre" in normalized or "ouvrir" in normalized):
         set_jarvis_state("processing", "Ouverture de Chrome…")
         open_chrome()
 
@@ -1105,6 +1305,13 @@ def handle_voice_command(
             play_local_audio(CHROME_CONFIRM_AUDIO, "Chrome confirmation")
         finally:
             stream.start()
+    elif (
+        "projet" in normalized
+        and ("verifie" in normalized or "verifier" in normalized)
+    ):
+        set_jarvis_state("processing", "Vérification du projet…")
+        project_result = check_project()
+        set_jarvis_state("idle", _project_check_message(project_result))
     else:
         log.info("Commande non reconnue : %s", command)
         set_jarvis_state("idle", "Commande non reconnue")
