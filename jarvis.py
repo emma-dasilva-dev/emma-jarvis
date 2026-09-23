@@ -57,6 +57,7 @@ import numpy as np
 import sounddevice as sd
 
 # --- tuning knobs -----------------------------------------------------------
+GREETING = "Hello Emma."
 SAMPLE_RATE = 44100
 BLOCK_MS = 40
 CHANNELS = 1
@@ -864,7 +865,7 @@ def _focus_existing_cursor_window_win32() -> bool:
 
 def run_double_clap_actions() -> None:
     """Run the action triggered by a detected double clap."""
-    log.info("Double clap action: Hello Emma.")
+    log.info("Double clap action: %s", GREETING)
 
 
 def open_cursor_window() -> None:
