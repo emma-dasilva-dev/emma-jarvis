@@ -910,7 +910,7 @@ def main() -> int:
     last_logged_double = 0.0
     first_clap_time: float | None = None
     spike_armed = True
-    welcome_sequence_done = False
+    double_clap_action_done = False
 
     log.info(
         "Listening (double clap: %.2f–%.2fs apart, rate=%d, block=%d ms, "
@@ -1012,11 +1012,11 @@ def main() -> int:
                         elif gap <= MAX_DOUBLE_GAP_S:
                             first_clap_time = None
                             last_logged_double = now
-                            if not welcome_sequence_done:
-                                welcome_sequence_done = True
+                            if not double_clap_action_done:
+                                double_clap_action_done = True
                                 log.info(
                                     "Double clap detected (gap=%.3fs, rms=%.5f, "
-                                    "noise_floor=%.5f, threshold=%.5f) — running welcome once",
+                                    "noise_floor=%.5f, threshold=%.5f) — running action",
                                     gap,
                                     level,
                                     noise_floor,
