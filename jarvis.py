@@ -65,6 +65,7 @@ GREETING_AUDIO = Path(__file__).resolve().parent / "assets" / "adrien-jarvis.wav
 CHROME_CONFIRM_AUDIO = Path(__file__).resolve().parent / "assets" / "chrome-ouvert.wav"
 COMMAND_LANGUAGE = "fr-FR"
 COMMAND_LISTEN_SECONDS = 4.0
+COMMAND_MIC_WARMUP_SECONDS = 0.35
 STATE_WS_HOST = "127.0.0.1"
 STATE_WS_PORT = 8765
 POST_ACTION_COOLDOWN_S = 2.5
@@ -1028,14 +1029,21 @@ def listen_for_voice_command(stream: sd.InputStream, blocksize: int) -> str | No
     log.info("Jarvis écoute... Parlez maintenant.")
     frames: list[np.ndarray] = []
     deadline = time.monotonic() + COMMAND_LISTEN_SECONDS
+    peak_rms = 0.0
 
     while time.monotonic() < deadline:
         data, overflowed = stream.read(blocksize)
         if overflowed:
             log.warning("Input overflow while listening for command.")
         frames.append(data.copy())
+        peak_rms = max(peak_rms, rms_mono(data))
 
     if not frames:
+        return None
+
+    log.info("Voice command capture peak rms=%.5f", peak_rms)
+    if peak_rms < INPUT_SILENT_RMS:
+        log.warning("Voice command capture was nearly silent.")
         return None
 
     recorded = np.concatenate(frames, axis=0)
@@ -1113,7 +1121,17 @@ def run_double_clap_actions(stream: sd.InputStream, blocksize: int) -> None:
     finally:
         stream.start()
 
-    time.sleep(0.15)
+    # Windows audio devices often need a moment after restarting the input
+    # stream. Drain that short period so speaker echo / stale buffers are not
+    # mistaken for Emma's command, then signal that Jarvis is truly ready.
+    warmup_deadline = time.monotonic() + COMMAND_MIC_WARMUP_SECONDS
+    while time.monotonic() < warmup_deadline:
+        try:
+            stream.read(blocksize)
+        except sd.PortAudioError as e:
+            log.warning("Mic warmup read failed: %s", e)
+            break
+
     set_jarvis_state("listening", "Je vous écoute…")
     command = listen_for_voice_command(stream, blocksize)
 
