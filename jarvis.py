@@ -62,6 +62,7 @@ GREETING_AUDIO = Path(__file__).resolve().parent / "assets" / "adrien-jarvis.wav
 CHROME_CONFIRM_AUDIO = Path(__file__).resolve().parent / "assets" / "chrome-ouvert.wav"
 COMMAND_LANGUAGE = "fr-FR"
 COMMAND_LISTEN_SECONDS = 4.0
+POST_ACTION_COOLDOWN_S = 2.5
 SAMPLE_RATE = 44100
 BLOCK_MS = 40
 CHANNELS = 1
@@ -956,11 +957,19 @@ def open_chrome() -> None:
     webbrowser.open("https://www.google.com")
 
 
-def handle_voice_command(command: str) -> None:
+def handle_voice_command(
+    command: str, stream: sd.InputStream
+) -> None:
     """Match a recognized French command to a Jarvis action."""
     if "chrome" in command and ("ouvre" in command or "ouvrir" in command):
         open_chrome()
-        play_local_audio(CHROME_CONFIRM_AUDIO, "Chrome confirmation")
+
+        # Jarvis must not hear its own confirmation sound.
+        stream.stop()
+        try:
+            play_local_audio(CHROME_CONFIRM_AUDIO, "Chrome confirmation")
+        finally:
+            stream.start()
     else:
         log.info("Commande non reconnue : %s", command)
 
@@ -979,7 +988,7 @@ def run_double_clap_actions(stream: sd.InputStream, blocksize: int) -> None:
     time.sleep(0.15)
     command = listen_for_voice_command(stream, blocksize)
     if command:
-        handle_voice_command(command)
+        handle_voice_command(command, stream)
 
 
 def open_cursor_window() -> None:
@@ -1135,10 +1144,11 @@ def main() -> int:
                                 threshold,
                             )
                             run_double_clap_actions(stream, blocksize)
-                            # Reset clap state after voice mode finishes.
+                            # Ignore Jarvis's own voice and residual speaker echo before
+                            # allowing a new double clap.
                             first_clap_time = None
                             spike_armed = False
-                            last_logged_double = time.monotonic()
+                            last_logged_double = time.monotonic() + POST_ACTION_COOLDOWN_S
                         else:
                             first_clap_time = now
 
