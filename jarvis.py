@@ -57,7 +57,7 @@ import numpy as np
 import sounddevice as sd
 
 # --- tuning knobs -----------------------------------------------------------
-GREETING = "Hello Emma."
+GREETING = "Good to have you back, Emma. I'm ready when you are."
 SAMPLE_RATE = 44100
 BLOCK_MS = 40
 CHANNELS = 1
