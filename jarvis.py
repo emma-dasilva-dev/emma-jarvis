@@ -479,6 +479,147 @@ def say_jarvis_welcome() -> None:
         log.warning("Could not play ElevenLabs audio: %s", e)
 
 
+
+def speak_dynamic_french(text: str, stream: sd.InputStream | None = None) -> bool:
+    """Generate a French Jarvis response with ElevenLabs and drive the orb from real audio."""
+    phrase = text.strip()
+    if not phrase:
+        return False
+
+    voice_id, model_id, output_format, pcm_rate = elevenlabs_env_config()
+    api_key = (os.environ.get("ELEVENLABS_API_KEY") or "").strip()
+
+    if not voice_id or not api_key:
+        log.warning(
+            "Réponse vocale dynamique ignorée : configurez ELEVENLABS_API_KEY et ELEVENLABS_VOICE_ID."
+        )
+        return False
+
+    try:
+        from elevenlabs.client import ElevenLabs
+    except ImportError:
+        log.warning("ElevenLabs manquant. Lancez : python -m pip install -r requirements.txt")
+        return False
+
+    try:
+        client = ElevenLabs(api_key=api_key)
+        chunks = client.text_to_speech.convert(
+            voice_id=voice_id,
+            text=phrase,
+            model_id=model_id,
+            output_format=output_format,
+        )
+        raw = b"".join(chunks)
+    except Exception as e:
+        log.warning("ElevenLabs TTS a échoué : %s", e)
+        return False
+
+    if not raw:
+        log.warning("ElevenLabs a retourné un audio vide.")
+        return False
+
+    pcm_i16 = np.frombuffer(raw, dtype=np.int16)
+    if pcm_i16.size == 0:
+        return False
+
+    stopped_stream = False
+    if stream is not None:
+        try:
+            stream.stop()
+            stopped_stream = True
+        except sd.PortAudioError:
+            stopped_stream = False
+
+    set_jarvis_state("speaking", phrase)
+
+    try:
+        chunk = 1024
+        smoothed_level = 0.0
+        with sd.OutputStream(
+            samplerate=pcm_rate,
+            channels=1,
+            dtype="int16",
+        ) as output:
+            for start in range(0, len(pcm_i16), chunk):
+                samples = pcm_i16[start : start + chunk]
+                if samples.size == 0:
+                    continue
+
+                output.write(samples.reshape(-1, 1))
+                normalized = samples.astype(np.float32) / 32768.0
+                rms = float(np.sqrt(np.mean(normalized * normalized)))
+                target = min(rms * 5.5, 1.0)
+                smoothed_level = smoothed_level * 0.35 + target * 0.65
+                publish_audio_level(smoothed_level)
+    except (sd.PortAudioError, ValueError) as e:
+        log.warning("Lecture de la réponse vocale impossible : %s", e)
+        return False
+    finally:
+        publish_audio_level(0.0)
+        if stopped_stream and stream is not None:
+            try:
+                stream.start()
+            except sd.PortAudioError as e:
+                log.warning("Impossible de redémarrer le micro après la réponse : %s", e)
+
+    return True
+
+
+def _project_check_speech(result: dict[str, object]) -> str:
+    """Create a natural French spoken summary of the real project-check result."""
+    root = Path(str(result.get("root", "")))
+    project_name = root.name or "le projet"
+    git = str(result.get("git", "non détecté"))
+    untracked = int(result.get("untracked", 0))
+    build = str(result.get("build", "non détecté"))
+    warnings = int(result.get("warnings", 0))
+    tests = str(result.get("tests", "non détectés"))
+    debug_calls = int(result.get("debug_calls", 0))
+
+    parts = [f"Vérification terminée pour {project_name}."]
+
+    if git == "propre":
+        parts.append("Le dépôt Git est propre.")
+    elif git != "non détecté":
+        parts.append(f"Git indique {git}.")
+
+    if untracked:
+        parts.append(
+            f"J'ai trouvé {untracked} fichier{'s' if untracked > 1 else ''} non suivi"
+            f"{'s' if untracked > 1 else ''}."
+        )
+
+    if build == "réussie":
+        parts.append("La compilation a réussi.")
+    elif build == "échouée":
+        parts.append("La compilation a échoué.")
+    elif build == "délai dépassé":
+        parts.append("La compilation a dépassé le délai autorisé.")
+
+    if warnings:
+        parts.append(
+            f"J'ai détecté {warnings} avertissement{'s' if warnings > 1 else ''}."
+        )
+
+    if tests == "réussis":
+        parts.append("Les tests ont réussi.")
+    elif tests == "échoués":
+        parts.append("Certains tests ont échoué.")
+
+    if debug_calls:
+        parts.append(
+            f"J'ai aussi repéré {debug_calls} appel"
+            f"{'s' if debug_calls > 1 else ''} de débogage de type printf."
+        )
+
+    if untracked or build in ("échouée", "délai dépassé") or warnings or tests == "échoués":
+        parts.append("Je vous conseille de vérifier ces points avant de pousser le projet.")
+    else:
+        parts.append("Aucun problème bloquant n'a été détecté.")
+
+    return " ".join(parts)
+
+
 def play_song(uri: str) -> None:
     u = uri.strip()
     if not u:
@@ -1318,9 +1459,15 @@ def handle_voice_command(
     ):
         set_jarvis_state("processing", "Vérification du projet…")
         project_result = check_project()
-        set_jarvis_state("idle", _project_check_message(project_result))
-        # Keep the result visible long enough to read before returning to idle.
-        time.sleep(3.5)
+        result_message = _project_check_message(project_result)
+        spoken_summary = _project_check_speech(project_result)
+
+        set_jarvis_state("idle", result_message)
+        spoke = speak_dynamic_french(spoken_summary, stream)
+
+        # If ElevenLabs is unavailable, still keep the visual result readable.
+        if not spoke:
+            time.sleep(3.5)
     else:
         log.info("Commande non reconnue : %s", command)
         set_jarvis_state("idle", "Commande non reconnue")
