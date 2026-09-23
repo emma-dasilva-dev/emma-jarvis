@@ -7,29 +7,17 @@ import { cn } from "@/lib/utils";
 interface VoicePoweredOrbProps {
   className?: string;
   hue?: number;
-  enableVoiceControl?: boolean;
-  voiceSensitivity?: number;
-  maxRotationSpeed?: number;
-  maxHoverIntensity?: number;
-  onVoiceDetected?: (detected: boolean) => void;
+  activity?: number;
+  state?: "idle" | "speaking" | "listening" | "processing";
 }
 
 export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
   className,
   hue = 0,
-  enableVoiceControl = true,
-  voiceSensitivity = 1.5,
-  maxRotationSpeed = 1.2,
-  maxHoverIntensity = 0.8,
-  onVoiceDetected,
+  activity = 0.06,
+  state = "idle",
 }) => {
   const ctnDom = useRef<HTMLDivElement>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const microphoneRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const dataArrayRef = useRef<Uint8Array | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-
   useEffect(() => {
     const container = ctnDom.current;
     if (!container) return;
@@ -198,95 +186,6 @@ export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
     let gl: WebGLRenderingContext | WebGL2RenderingContext | null = null;
     let rafId = 0;
     let program: Program | null = null;
-    let mounted = true;
-    let microphoneReady = false;
-
-    const stopMicrophone = async () => {
-      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-      mediaStreamRef.current = null;
-
-      microphoneRef.current?.disconnect();
-      microphoneRef.current = null;
-
-      analyserRef.current?.disconnect();
-      analyserRef.current = null;
-
-      if (
-        audioContextRef.current &&
-        audioContextRef.current.state !== "closed"
-      ) {
-        await audioContextRef.current.close();
-      }
-
-      audioContextRef.current = null;
-      dataArrayRef.current = null;
-      microphoneReady = false;
-    };
-
-    const initMicrophone = async () => {
-      if (!enableVoiceControl) return false;
-
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
-            sampleRate: 44100,
-          },
-        });
-
-        if (!mounted) {
-          stream.getTracks().forEach((track) => track.stop());
-          return false;
-        }
-
-        mediaStreamRef.current = stream;
-        const audioContext = new AudioContext();
-        audioContextRef.current = audioContext;
-
-        if (audioContext.state === "suspended") {
-          await audioContext.resume();
-        }
-
-        const analyser = audioContext.createAnalyser();
-        const microphone = audioContext.createMediaStreamSource(stream);
-
-        analyser.fftSize = 512;
-        analyser.smoothingTimeConstant = 0.3;
-        analyser.minDecibels = -90;
-        analyser.maxDecibels = -10;
-
-        microphone.connect(analyser);
-
-        analyserRef.current = analyser;
-        microphoneRef.current = microphone;
-        dataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
-        microphoneReady = true;
-        return true;
-      } catch (error) {
-        console.warn("Jarvis orb microphone unavailable:", error);
-        return false;
-      }
-    };
-
-    const analyzeAudio = () => {
-      const analyser = analyserRef.current;
-      const data = dataArrayRef.current;
-      if (!analyser || !data) return 0;
-
-      analyser.getByteFrequencyData(data);
-
-      let sum = 0;
-      for (let i = 0; i < data.length; i += 1) {
-        const value = data[i] / 255;
-        sum += value * value;
-      }
-
-      const rms = Math.sqrt(sum / data.length);
-      return Math.min(rms * voiceSensitivity * 3, 1);
-    };
-
     try {
       renderer = new Renderer({
         alpha: true,
@@ -345,12 +244,10 @@ export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
 
       window.addEventListener("resize", resize);
       resize();
-      void initMicrophone();
 
       let lastTime = 0;
       let currentRot = 0;
-      let voiceLevel = 0;
-      const baseRotationSpeed = 0.3;
+      const baseRotationSpeed = 0.18;
 
       const update = (t: number) => {
         rafId = requestAnimationFrame(update);
@@ -362,29 +259,19 @@ export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
         program.uniforms.iTime.value = t * 0.001;
         program.uniforms.hue.value = hue;
 
-        if (enableVoiceControl && microphoneReady) {
-          voiceLevel = analyzeAudio();
-          const detected = voiceLevel > 0.1;
-          onVoiceDetected?.(detected);
+        const targetActivity = Math.max(0, Math.min(activity, 1));
+        const stateBoost =
+          state === "processing" ? 1.5 :
+          state === "speaking" ? 1.2 :
+          state === "listening" ? 0.9 : 0.2;
 
-          const voiceRotationSpeed =
-            baseRotationSpeed + voiceLevel * maxRotationSpeed * 2;
+        currentRot += dt * (baseRotationSpeed + targetActivity * stateBoost);
 
-          if (voiceLevel > 0.05) {
-            currentRot += dt * voiceRotationSpeed;
-          }
-
-          program.uniforms.hover.value = Math.min(voiceLevel * 2, 1);
-          program.uniforms.hoverIntensity.value = Math.min(
-            voiceLevel * maxHoverIntensity * 0.8,
-            maxHoverIntensity,
-          );
-        } else {
-          program.uniforms.hover.value = 0;
-          program.uniforms.hoverIntensity.value = 0;
-          onVoiceDetected?.(false);
-        }
-
+        program.uniforms.hover.value = Math.min(targetActivity * 1.55, 1);
+        program.uniforms.hoverIntensity.value = Math.min(
+          targetActivity * 0.72,
+          0.8,
+        );
         program.uniforms.rot.value = currentRot;
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         renderer.render({ scene: mesh });
@@ -393,10 +280,8 @@ export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
       rafId = requestAnimationFrame(update);
 
       return () => {
-        mounted = false;
         cancelAnimationFrame(rafId);
         window.removeEventListener("resize", resize);
-        void stopMicrophone();
 
         if (gl?.canvas && container.contains(gl.canvas)) {
           container.removeChild(gl.canvas);
@@ -408,19 +293,9 @@ export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
       console.error("Error initializing Jarvis orb:", error);
       container.replaceChildren();
 
-      return () => {
-        mounted = false;
-        void stopMicrophone();
-      };
+      return () => {};
     }
-  }, [
-    enableVoiceControl,
-    hue,
-    maxHoverIntensity,
-    maxRotationSpeed,
-    onVoiceDetected,
-    voiceSensitivity,
-  ]);
+  }, [activity, hue, state]);
 
   return <div ref={ctnDom} className={cn("relative h-full w-full", className)} />;
 };
