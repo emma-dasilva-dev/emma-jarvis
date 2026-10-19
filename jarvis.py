@@ -1535,7 +1535,11 @@ def run_double_clap_actions(stream: sd.InputStream, blocksize: int) -> None:
     """Greet the configured user, listen for one voice command, then run it."""
     log.info("Réponse de Jarvis : %s", GREETING)
 
-    greeting_message = GREETING
+    greeting_message = (
+        "Bonjour. Je suis JARVIS, votre assistant personnel. "
+        "Tous les systèmes sont opérationnels. Je suis à votre écoute."
+        if configured_greeting_audio() is not None else GREETING
+    )
     set_jarvis_state("speaking", greeting_message)
     stream.stop()
     try:
