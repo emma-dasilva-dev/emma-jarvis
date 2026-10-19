@@ -49,11 +49,12 @@ This opens the Vite interface at `http://127.0.0.1:5173`; the state-only WebSock
 | `JARVIS_COMMAND_LANGUAGE` | Speech recognition locale; defaults to `fr-FR`. Existing command matching remains French. |
 | `JARVIS_INPUT_DEVICE` | Optional microphone index or a substring of its device name. |
 | `JARVIS_PROJECT_PATH` | Optional local folder for project and pre-push checks. |
+| `JARVIS_GREETING_AUDIO` | Optional WAV from ElevenLabs, relative to the repository or an absolute path. Defaults to `assets/jarvis-welcome.wav` when present. |
 | `ELEVENLABS_API_KEY` | Optional ElevenLabs credential for synthesized voice. |
 | `ELEVENLABS_VOICE_ID` | Optional voice ID; required alongside the key for speech. |
 | `JARVIS_USE_LEGACY_GREETING_AUDIO` | Defaults to false. Explicit opt-in to the original prerecorded audio; it may name the original developer. |
 
-The initial greeting is displayed in the orb UI. Spoken personalized greetings require an ElevenLabs key and voice ID. Without credentials, JARVIS can display its greeting but cannot synthesize it. Some other prerecorded command acknowledgements are still bundled and will be generalized in later work.
+To use a generic recorded welcome, export a 16-bit PCM WAV from ElevenLabs, name it `jarvis-welcome.wav`, and place it in `assets/`. This recording takes precedence over synthesized personalized speech; the generic text appears in the UI when the file is present. Without a recording, spoken personalized greetings require an ElevenLabs key and voice ID. Without credentials, JARVIS can display its greeting but cannot synthesize it. Some other prerecorded command acknowledgements are still bundled and will be generalized in later work.
 
 ## Current functionality and limitations
 
