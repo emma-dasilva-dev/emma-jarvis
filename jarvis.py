@@ -1171,17 +1171,31 @@ def play_local_audio(path: Path, label: str) -> None:
         publish_audio_level(0.0)
 
 
+def _valid_greeting_wav(path: Path) -> bool:
+    """Accept only nonempty PCM WAV files supported by our audio player."""
+    try:
+        with wave.open(str(path), "rb") as audio:
+            if (audio.getcomptype() == "NONE" and audio.getsampwidth() == 2
+                    and audio.getnchannels() in (1, 2) and audio.getnframes() > 0):
+                return True
+        log.warning("Greeting requires nonempty 16-bit PCM WAV: %s", path)
+    except (OSError, EOFError, wave.Error) as exc:
+        log.warning("Invalid greeting WAV %s: %s", path, exc)
+    return False
+
+
 def configured_greeting_audio() -> Path | None:
-    """Use a per-installation recording, or a generic recording included in assets."""
+    """Choose a valid installed WAV without reverting to the old named recording."""
     override = (os.environ.get("JARVIS_GREETING_AUDIO") or "").strip()
     if override:
         path = Path(override).expanduser()
         if not path.is_absolute():
             path = Path(__file__).resolve().parent / path
-        if path.is_file():
+        if path.is_file() and _valid_greeting_wav(path):
             return path
-        log.warning("Configured greeting audio not found: %s", path)
-    if DEFAULT_GREETING_AUDIO.is_file():
+        log.warning("Configured greeting unusable: %s", path)
+        return None
+    if DEFAULT_GREETING_AUDIO.is_file() and _valid_greeting_wav(DEFAULT_GREETING_AUDIO):
         return DEFAULT_GREETING_AUDIO
     return None
 
@@ -1521,11 +1535,7 @@ def run_double_clap_actions(stream: sd.InputStream, blocksize: int) -> None:
     """Greet the configured user, listen for one voice command, then run it."""
     log.info("Réponse de Jarvis : %s", GREETING)
 
-    greeting_message = (
-        "Bonjour. Je suis JARVIS, votre assistant personnel. "
-        "Tous les systèmes sont opérationnels. Je suis à votre écoute."
-        if configured_greeting_audio() is not None else GREETING
-    )
+    greeting_message = GREETING
     set_jarvis_state("speaking", greeting_message)
     stream.stop()
     try:
