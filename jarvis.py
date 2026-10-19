@@ -61,7 +61,7 @@ import sounddevice as sd
 import websockets
 
 # --- tuning knobs -----------------------------------------------------------
-GREETING = "Ravi de vous retrouver, Emma. Je suis prêt quand vous l’êtes."
+GREETING = ""  # Populated after loading user configuration below.
 GREETING_AUDIO = Path(__file__).resolve().parent / "assets" / "adrien-jarvis.wav"
 CHROME_CONFIRM_AUDIO = Path(__file__).resolve().parent / "assets" / "chrome-ouvert.wav"
 PRE_PUSH_CHECK_AUDIO = Path(__file__).resolve().parent / "assets" / "pre-push-check.wav"
@@ -119,6 +119,20 @@ JARVIS_AFTER_SONG_DELAY_S = 1.0
 JARVIS_WELCOME_CACHE_ENABLED = True
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
+
+# Each installation owns its settings. Never hard-code an individual user into the assistant.
+JARVIS_USER_NAME = (os.environ.get("JARVIS_USER_NAME") or "").strip()
+COMMAND_LANGUAGE = (os.environ.get("JARVIS_COMMAND_LANGUAGE") or COMMAND_LANGUAGE).strip()
+GREETING = (
+    f"Ravi de vous retrouver, {JARVIS_USER_NAME}. Je suis prêt quand vous l’êtes."
+    if JARVIS_USER_NAME
+    else "Bonjour. Je suis prêt quand vous l’êtes."
+)
+# Legacy prerecorded audio may contain the original owner's name. Opt in explicitly.
+JARVIS_USE_LEGACY_GREETING_AUDIO = (
+    os.environ.get("JARVIS_USE_LEGACY_GREETING_AUDIO", "false").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1157,8 +1171,11 @@ def play_local_audio(path: Path, label: str) -> None:
 
 
 def play_local_greeting() -> None:
-    """Play the saved Jarvis greeting."""
-    play_local_audio(GREETING_AUDIO, "Greeting")
+    """Speak the configured greeting, or optionally play the legacy recording."""
+    if JARVIS_USE_LEGACY_GREETING_AUDIO:
+        play_local_audio(GREETING_AUDIO, "Legacy greeting")
+    elif not speak_dynamic_french(GREETING):
+        log.info("Greeting shown in UI (configure ElevenLabs for spoken output).")
 
 
 def listen_for_voice_command(stream: sd.InputStream, blocksize: int) -> str | None:
@@ -1482,7 +1499,7 @@ def handle_voice_command(
 
 
 def run_double_clap_actions(stream: sd.InputStream, blocksize: int) -> None:
-    """Greet Emma, listen for one French voice command, then run it."""
+    """Greet the configured user, listen for one voice command, then run it."""
     log.info("Réponse de Jarvis : %s", GREETING)
 
     set_jarvis_state("speaking", GREETING)
@@ -1494,7 +1511,7 @@ def run_double_clap_actions(stream: sd.InputStream, blocksize: int) -> None:
 
     # Windows audio devices often need a moment after restarting the input
     # stream. Drain that short period so speaker echo / stale buffers are not
-    # mistaken for Emma's command, then signal that Jarvis is truly ready.
+    # mistaken for the user's command, then signal that Jarvis is truly ready.
     warmup_deadline = time.monotonic() + COMMAND_MIC_WARMUP_SECONDS
     while time.monotonic() < warmup_deadline:
         try:
