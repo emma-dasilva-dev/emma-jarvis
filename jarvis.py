@@ -63,6 +63,7 @@ import websockets
 # --- tuning knobs -----------------------------------------------------------
 GREETING = ""  # Populated after loading user configuration below.
 GREETING_AUDIO = Path(__file__).resolve().parent / "assets" / "adrien-jarvis.wav"
+DEFAULT_GREETING_AUDIO = Path(__file__).resolve().parent / "assets" / "jarvis-welcome.wav"
 CHROME_CONFIRM_AUDIO = Path(__file__).resolve().parent / "assets" / "chrome-ouvert.wav"
 PRE_PUSH_CHECK_AUDIO = Path(__file__).resolve().parent / "assets" / "pre-push-check.wav"
 COMMAND_LANGUAGE = "fr-FR"
@@ -1170,9 +1171,27 @@ def play_local_audio(path: Path, label: str) -> None:
         publish_audio_level(0.0)
 
 
+def configured_greeting_audio() -> Path | None:
+    """Use a per-installation recording, or a generic recording included in assets."""
+    override = (os.environ.get("JARVIS_GREETING_AUDIO") or "").strip()
+    if override:
+        path = Path(override).expanduser()
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parent / path
+        if path.is_file():
+            return path
+        log.warning("Configured greeting audio not found: %s", path)
+    if DEFAULT_GREETING_AUDIO.is_file():
+        return DEFAULT_GREETING_AUDIO
+    return None
+
+
 def play_local_greeting() -> None:
-    """Speak the configured greeting, or optionally play the legacy recording."""
-    if JARVIS_USE_LEGACY_GREETING_AUDIO:
+    """Use the chosen recording, or synthesize the greeting with ElevenLabs."""
+    audio_path = configured_greeting_audio()
+    if audio_path is not None:
+        play_local_audio(audio_path, "Greeting")
+    elif JARVIS_USE_LEGACY_GREETING_AUDIO:
         play_local_audio(GREETING_AUDIO, "Legacy greeting")
     elif not speak_dynamic_french(GREETING):
         log.info("Greeting shown in UI (configure ElevenLabs for spoken output).")
@@ -1502,7 +1521,12 @@ def run_double_clap_actions(stream: sd.InputStream, blocksize: int) -> None:
     """Greet the configured user, listen for one voice command, then run it."""
     log.info("Réponse de Jarvis : %s", GREETING)
 
-    set_jarvis_state("speaking", GREETING)
+    greeting_message = (
+        "Bonjour. Je suis JARVIS, votre assistant personnel. "
+        "Tous les systèmes sont opérationnels. Je suis à votre écoute."
+        if configured_greeting_audio() is not None else GREETING
+    )
+    set_jarvis_state("speaking", greeting_message)
     stream.stop()
     try:
         play_local_greeting()
