@@ -88,7 +88,21 @@ def _start_ui() -> subprocess.Popen:
     )
 
 
+def _ensure_ports_available() -> None:
+    """Fail fast rather than showing a UI connected to an older JARVIS process."""
+    for port in (UI_PORT, jarvis.STATE_WS_PORT):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+                listener.bind((UI_HOST, port))
+        except OSError as exc:
+            raise RuntimeError(
+                f"Local port {port} is already in use. Stop the previous JARVIS "
+                "instance before starting a new one."
+            ) from exc
+
+
 def main() -> int:
+    _ensure_ports_available()
     print("Starting Jarvis...")
     ui_process = _start_ui()
 
