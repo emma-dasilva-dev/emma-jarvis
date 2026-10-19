@@ -1,73 +1,79 @@
-# Desktop clap → Jarvis-style welcome
+# JARVIS — configurable desktop voice assistant
 
-Python script that listens to your default microphone and runs a **double-clap** welcome flow (Spotify, Chrome windows, ElevenLabs voice, Cursor). See constants at the top of `jarvis.py` for behavior and tuning.
+A local-first desktop assistant prototype with **Python microphone and command handling**, **double-clap activation**, and a **React/Vite animated orb** connected over a local WebSocket.
 
-## Setup
+JARVIS is intended to be **clonable**: each person can configure their own name, microphone, language, project directory and optional voice provider. The current command recognition and responses are primarily **French**; changing the recognition locale does **not** translate or generalize the command parser.
 
-From this project directory:
+## Supported environment
+
+The current implementation is primarily developed for **Windows**. Some actions rely on Windows APIs or locally installed Chrome/Cursor. Other platforms are not yet verified. You need Python, Node.js/npm, a microphone, and Git for Git-related commands.
+
+## First-time setup
+
+```bash
+git clone https://github.com/emma-dasilva-dev/emma-jarvis.git
+cd emma-jarvis
+python -m venv .venv
+```
+
+Activate the environment:
+
+- Windows PowerShell: `.venv\Scripts\Activate.ps1`
+- Windows cmd: `.venv\Scripts\activate.bat`
+- macOS/Linux: `source .venv/bin/activate`
+
+Then install dependencies:
 
 ```bash
 python -m pip install -r requirements.txt
+cd ui
+npm ci
+cd ..
 ```
 
-## Environment variables
+Copy `.env.example` to `.env` (PowerShell: `Copy-Item .env.example .env`; macOS/Linux: `cp .env.example .env`) and edit it for **your own** machine. Do not commit `.env`.
 
-The script loads a **`.env` file** in the same folder as `jarvis.py` (via `python-dotenv`). You can also set variables in the shell.
-
-### Required (ElevenLabs welcome line)
-
-| Variable | Purpose |
-| -------- | ------- |
-| `ELEVENLABS_API_KEY` | API key from [ElevenLabs](https://elevenlabs.io). |
-| `ELEVENLABS_VOICE_ID` | Voice ID from the ElevenLabs app (My Voices / library). |
-
-Without these, the welcome speech is skipped (other actions may still run).
-
-### Optional
-
-| Variable | Purpose |
-| -------- | ------- |
-| `ELEVENLABS_MODEL_ID` | TTS model (default in code: `eleven_multilingual_v2`). |
-| `ELEVENLABS_OUTPUT_FORMAT` | e.g. `pcm_24000` (must match playback expectations). |
-| `ELEVENLABS_PCM_SAMPLE_RATE` | Override PCM sample rate if it differs from the format name. |
-| `JARVIS_WELCOME_CACHE_DIR` | Custom folder for cached welcome WAV (default: `.cache/jarvis_welcome/` under the project). |
-| `JARVIS_INPUT_DEVICE` | Optional mic override: **integer** index or **substring** of the device name. If unset, the script uses the Windows default; when that mic is silent, it auto-picks the loudest working input. List devices: `python -c "import sounddevice as sd; print(sd.query_devices())"`. |
-| `CLAUDE_CODE_URL` | URL opened for Claude in Chrome (default: new chat). |
-| `TASARADAR_URL` | URL opened for Tasaradar in Chrome (default: `https://tasaradar.com`). `BINANCE_BTC_URL` is still read as a fallback if set. |
-| `CHROME_NEW_WINDOW_WAIT_S` | Seconds to wait for a new Chrome window on Windows (default `25`). |
-| `CHROME_WINDOW_WIDTH` / `CHROME_WINDOW_HEIGHT` | Windowed Chrome size when not fullscreen. |
-
-Example `.env`:
-
-```env
-ELEVENLABS_API_KEY=your_key_here
-ELEVENLABS_VOICE_ID=your_voice_id_here
-```
-
-## Run
+Start the Python assistant and UI together:
 
 ```bash
-python jarvis.py
+python start_jarvis.py
 ```
 
-Allow the microphone if Windows prompts you. Stop with **Ctrl+C**.
+This opens the Vite interface at `http://127.0.0.1:5173`; the state-only WebSocket listens on `127.0.0.1:8765`. Stop with Ctrl+C. You can also run only the Python assistant with `python jarvis.py`.
 
-## Tuning
+## User configuration
 
-Edit the constants at the top of `jarvis.py`:
+| Setting | Meaning |
+| --- | --- |
+| `JARVIS_USER_NAME` | Optional name used in the greeting. Blank gives a generic greeting. |
+| `JARVIS_COMMAND_LANGUAGE` | Speech recognition locale; defaults to `fr-FR`. Existing command matching remains French. |
+| `JARVIS_INPUT_DEVICE` | Optional microphone index or a substring of its device name. |
+| `JARVIS_PROJECT_PATH` | Optional local folder for project and pre-push checks. |
+| `JARVIS_GREETING_AUDIO` | Optional WAV from ElevenLabs, relative to the repository or an absolute path. Defaults to `assets/jarvis-welcome.wav` when present. |
+| `ELEVENLABS_API_KEY` | Optional ElevenLabs credential for synthesized voice. |
+| `ELEVENLABS_VOICE_ID` | Optional voice ID; required alongside the key for speech. |
+| `JARVIS_USE_LEGACY_GREETING_AUDIO` | Defaults to false. Explicit opt-in to the original prerecorded audio; it may name the original developer. |
 
-| Constant      | Effect                                                            |
-| ------------- | ----------------------------------------------------------------- |
-| `SPIKE_RATIO` | Increase if you get false triggers; decrease if claps are missed. |
-| `COOLDOWN_S`  | Minimum time between two logged claps.                            |
-| `BLOCK_MS`    | Larger = slightly less CPU, a bit less precise timing.            |
-| `MIN_RMS`     | Floor on how loud a block must be (helps in very quiet rooms).  |
-| `SAMPLE_RATE` | Try `48000` if your device does not like `44100`.                 |
+To use a generic recorded welcome, export a 16-bit PCM WAV from ElevenLabs, name it `jarvis-welcome.wav`, and place it in `assets/`. This recording takes precedence over synthesized personalized speech; the generic text appears in the UI when the file is present. Without a recording, spoken personalized greetings require an ElevenLabs key and voice ID. Without credentials, JARVIS can display its greeting but cannot synthesize it. Some other prerecorded command acknowledgements are still bundled and will be generalized in later work.
 
-## Troubleshooting
+## Current functionality and limitations
 
-- **Wrong or quiet mic:** On startup the script probes your default Windows input. If it is silent, it **auto-selects** the loudest working mic. To force a specific device, set `JARVIS_INPUT_DEVICE` in `.env` (index or name substring from `sounddevice.query_devices()`).
-- **PortAudio / audio errors:** Update audio drivers or try another `SAMPLE_RATE`.
-- **No reaction to claps:** Lower `SPIKE_RATIO` slightly or speak/clap closer to the mic.
-- **Spam logs:** Raise `SPIKE_RATIO` or `COOLDOWN_S`.
-- **No welcome speech:** Set `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` in `.env` and restart the terminal so variables load.
+- Detect double claps using the Python microphone stream.
+- Capture and recognize short commands; the current command set targets French.
+- Open Chrome and run a local project/pre-push check.
+- Render idle, listening, processing and speaking states using React and WebSockets.
+- ElevenLabs is optional, but not all voice interactions yet have a credential-free fallback.
+- This is **not yet** a general-purpose LLM assistant, safe command executor, or fully tested cross-platform application.
+- Do not expose the development server or WebSocket port publicly. Review any local commands before running this software.
+
+## Repository hygiene
+
+The original history includes Python bytecode caches and demo audio files. Ignore rules now prevent newly generated caches from being added accidentally, but **previously tracked files remain tracked** until explicitly removed. Existing recordings may be licensed or personal; review redistribution rights before publishing a release. The repository does not yet contain an explicit open-source license; a suitable license must be selected before advertising reuse rights.
+
+## Next milestones
+
+1. Generalize all remaining prerecorded phrases and app-specific actions.
+2. Add a safe action registry, with permission checks for potentially destructive commands.
+3. Separate configuration, audio detection, transcription, actions and state transport into testable modules.
+4. Add automated unit tests and platform verification.
+5. Select an open-source license and create a release-ready onboarding experience.
